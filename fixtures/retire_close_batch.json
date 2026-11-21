@@ -1,0 +1,24 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-RET-EAST-01",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-20T00:00:00Z",
+      "open_time": "09:30",
+      "close_time": "21:30",
+      "weekday_mask": "1111100",
+      "biz_status": "closed",
+      "payload": {"reason": "租约到期撤店，进入退役集 closed"}
+    },
+    {
+      "id": "SNAP-RET-WEST-01",
+      "store_id": "ST-WEST-01",
+      "as_of_ts": "2026-11-20T00:00:00Z",
+      "open_time": "08:30",
+      "close_time": "20:30",
+      "weekday_mask": "1111100",
+      "biz_status": "retired",
+      "payload": {"reason": "品牌下线，进入退役集 retired"}
+    }
+  ]
+}

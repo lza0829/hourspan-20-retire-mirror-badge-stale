@@ -1,0 +1,23 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-SNEAK-EAST-01",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-21T00:00:00Z",
+      "open_time": "08:00",
+      "close_time": "22:00",
+      "weekday_mask": "1111110",
+      "payload": {"reason": "上游重传营业快照：无 biz_status 字段，缺省补 open 不算显式复活标记，必须搁置"}
+    },
+    {
+      "id": "SNAP-SNEAK-WEST-01",
+      "store_id": "ST-WEST-01",
+      "as_of_ts": "2026-11-21T00:00:00Z",
+      "open_time": "08:30",
+      "close_time": "20:30",
+      "weekday_mask": "1111100",
+      "biz_status": "suspended",
+      "payload": {"reason": "非 open 营业态试图回写已退役键，必须搁置"}
+    }
+  ]
+}

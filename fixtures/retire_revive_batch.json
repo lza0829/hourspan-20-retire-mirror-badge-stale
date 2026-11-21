@@ -1,0 +1,14 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-REVIVE-EAST-01",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-22T00:00:00Z",
+      "open_time": "09:00",
+      "close_time": "21:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "payload": {"reason": "换址重开：显式 biz_status=open 复活，关退役段开新营业段"}
+    }
+  ]
+}
