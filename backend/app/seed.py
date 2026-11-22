@@ -3,6 +3,8 @@ import json
 from datetime import datetime, timezone
 
 from app.db import FIXTURES_DIR, connect
+from app.modules import logical_delete_close as ldc
+from app.modules import retire_mirror_badge as rbadge
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -88,6 +90,13 @@ CREATE TABLE IF NOT EXISTS scd_proofs (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mirror_write_badges (
+  store_id TEXT PRIMARY KEY,
+  badge TEXT NOT NULL,
+  closed_hist_id TEXT,
+  updated_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_hist_store_current
   ON dim_store_hours_hist(store_id, is_current);
 CREATE INDEX IF NOT EXISTS idx_snap_store_ts
@@ -123,7 +132,11 @@ def init_db():
 
 
 def _migrate(conn):
-    """老库就地补列：biz_status_explicit 缺省 1（历史快照视为显式）。"""
+    """老库就地补列/补投影：
+    - source_snapshots.biz_status_explicit 缺省 1（历史快照视为显式）；
+    - mirror_write_badges 缺行补齐：以现场镜态为权威投影（只补缺失，不改既有行，
+      既有分叉留给核证曝光、由 /api/retire/badges/sync 修复）。
+    """
     cols = {
         r["name"]
         for r in conn.execute("PRAGMA table_info(source_snapshots)").fetchall()
@@ -132,6 +145,19 @@ def _migrate(conn):
         conn.execute(
             "ALTER TABLE source_snapshots "
             "ADD COLUMN biz_status_explicit INTEGER NOT NULL DEFAULT 1"
+        )
+    retired = ldc.retired_set(conn)
+    now = now_iso()
+    mirrors = conn.execute("SELECT * FROM dim_store_hours_current").fetchall()
+    for m in mirrors:
+        badge, closed_hist_id = rbadge.desired_badge(
+            m["biz_status"], m["hist_id"], retired
+        )
+        conn.execute(
+            """INSERT OR IGNORE INTO mirror_write_badges(
+                 store_id, badge, closed_hist_id, updated_at
+               ) VALUES (?,?,?,?)""",
+            (m["store_id"], badge, closed_hist_id, now),
         )
 
 
@@ -191,6 +217,8 @@ def _seed(conn):
             ) VALUES (?,?,?,?,?,?,?,?)""",
             (s["id"], ot, ct, wm, st, hist_id, as_of, rh),
         )
+        # 镜侧角标投影（架构乙·现场权威）：种子镜均为营业态 → 可写角标
+        rbadge.upsert_badge(conn, s["id"], rbadge.BADGE_WRITABLE, None, created)
         conn.execute(
             """INSERT INTO scd_proofs(
               store_id, hist_id, mirror_hist_id, row_hash, valid, detail_json, created_at

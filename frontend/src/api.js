@@ -13,3 +13,7 @@ export async function api(path, options) {
 export function retireBadges(...args) {
   return api("/api/retire/badges");
 }
+
+export function retireBadgeVerify(...args) {
+  return api("/api/retire/badges/verify");
+}

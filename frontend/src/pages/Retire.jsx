@@ -3,16 +3,33 @@ import { api } from "../api.js";
 
 export default function Retire() {
   const [data, setData] = useState(null);
+  const [badges, setBadges] = useState(null);
+  const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
-  const reload = () =>
+  const reload = () => {
     api("/api/retirements").then(setData).catch((e) => setErr(String(e.message || e)));
+    api("/api/retire/badges/verify").then(setBadges).catch((e) => setErr(String(e.message || e)));
+  };
 
   useEffect(() => { reload(); }, []);
+
+  const syncBadges = async () => {
+    setErr("");
+    try {
+      const r = await api("/api/retire/badges/sync", { method: "POST", body: "{}" });
+      setMsg(JSON.stringify(r, null, 2));
+      await reload();
+    } catch (e) {
+      setErr(String(e.message || e));
+    }
+  };
 
   const parseMember = (q) => {
     try { return JSON.parse(q.member_json); } catch { return {}; }
   };
+
+  const pipeOk = data && badges && data.ok && badges.ok;
 
   return (
     <>
@@ -20,8 +37,10 @@ export default function Retire() {
         <div>
           <h1>退役核证</h1>
           <p>
-            维态退役管道（只读）：biz_status∈退役集 → 同事务关段+退役段+刷镜；
+            维态退役管道（只读）：biz_status∈退役集 → 同事务关段+退役段+刷镜+卸角标；
             无显式 open 复活标记的快照必搁置留因。退役段即退役痕迹，不物理删 hist。
+            角标为镜态同事务投影（架构乙·现场权威）：写闸只扫现场 is_current/镜态，
+            角标仅展示+核证，分叉即核证失败。
           </p>
         </div>
       </div>
@@ -50,10 +69,14 @@ export default function Retire() {
               <div className="value">{data.summary["全局违例"]}</div>
             </div>
             <div className="card">
+              <div className="label">角标违例</div>
+              <div className="value">{badges ? badges.summary["违例"] : "—"}</div>
+            </div>
+            <div className="card">
               <div className="label">管道态</div>
               <div className="value">
-                <span className={`badge ${data.ok ? "ok" : "bad"}`}>
-                  {data.ok ? "闭合" : "破闭"}
+                <span className={`badge ${pipeOk ? "ok" : "bad"}`}>
+                  {pipeOk ? "闭合" : "破闭"}
                 </span>
               </div>
             </div>
@@ -62,8 +85,9 @@ export default function Retire() {
           <div className="panel">
             <h2>验证路径（夹具）</h2>
             <p className="muted mono">
-              retire_close_batch.json（营业→退役）→ retire_sneak_batch.json（无复活标记，必搁置）
-              → retire_revive_batch.json（显式 open 复活）。入档 → 检测（带 batch_id）→ 应用 Type2。
+              retire_close_batch.json（营业→退役，同事务卸角标）→ retire_sneak_batch.json（无复活标记，必搁置）
+              → retire_revive_batch.json（显式 open 复活，角标回可写）。入档 → 检测（带 batch_id）→ 应用 Type2。
+              人为只改角标：核证必失败，写闸不采信角标仍按现场判定（架构乙）；scripts/verify_retire_badge.py 全量演练。
             </p>
           </div>
 
@@ -82,6 +106,88 @@ export default function Retire() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {badges && (
+            <div className="panel">
+              <h2>
+                退役角标核验（只读 · GET /api/retire/badges/verify）{" "}
+                <span className={`badge ${badges.ok ? "ok" : "bad"}`}>
+                  {badges.ok ? "闭合" : "破闭"}
+                </span>
+              </h2>
+              <p className="muted">
+                {badges.architecture}。角标 {badges.summary["角标"]} ·
+                已卸(retired) {badges.summary["已卸(retired)"]} ·
+                可写(writable) {badges.summary["可写(writable)"]} ·
+                违例 {badges.summary["违例"]}
+              </p>
+              {badges.violations.length > 0 && (
+                <table>
+                  <thead><tr><th>kind</th><th>门店</th><th>细节</th></tr></thead>
+                  <tbody>
+                    {badges.violations.map((v, i) => (
+                      <tr key={i}>
+                        <td className="mono">{v.kind}</td>
+                        <td>{v.store_id || "—"}</td>
+                        <td className="mono">{JSON.stringify(v)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <table>
+                <thead>
+                  <tr>
+                    <th>门店</th><th>角标</th><th>closed_hist_id</th><th>镜态</th>
+                    <th>镜 hist</th><th>应有投影</th><th>检项</th><th>更新时刻</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {badges.rows.map((r) => (
+                    <tr key={r.store_id}>
+                      <td>{r.store_id}</td>
+                      <td>
+                        {r.badge ? (
+                          <span className={`badge ${r.badge === "retired" ? "retired" : "ok"}`}>
+                            {r.badge}
+                          </span>
+                        ) : (
+                          <span className="badge bad">缺失</span>
+                        )}
+                      </td>
+                      <td className="mono">{r.closed_hist_id || "—"}</td>
+                      <td>
+                        {r.mirror_status ? (
+                          <span className={`badge ${r.mirror_status}`}>{r.mirror_status}</span>
+                        ) : (
+                          <span className="badge bad">无镜</span>
+                        )}
+                      </td>
+                      <td className="mono">{r.mirror_hist_id || "—"}</td>
+                      <td className="mono">
+                        {r.expected_badge || "—"}
+                        {r.expected_closed_hist_id ? ` @ ${r.expected_closed_hist_id}` : ""}
+                      </td>
+                      <td>
+                        {r.checks.map((c) => (
+                          <span key={c.check} className={`badge ${c.ok ? "ok" : "bad"}`} title={c.check}>
+                            {c.ok ? "✓" : "✗"}
+                          </span>
+                        ))}
+                      </td>
+                      <td>{r.updated_at || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="actions" style={{ marginTop: "0.75rem" }}>
+                <button className="secondary" onClick={syncBadges}>
+                  以现场为准重投影角标（POST /api/retire/badges/sync）
+                </button>
+              </div>
+              {msg && <pre className="msg">{msg}</pre>}
             </div>
           )}
 

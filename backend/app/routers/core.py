@@ -3,6 +3,7 @@ from fastapi import APIRouter, Body, HTTPException
 from app.db import connect
 from app.modules import STUBS
 from app.modules import logical_delete_close as ldc
+from app.modules import retire_mirror_badge as rbadge
 from app.services import catalog, detect, ingest, scd
 
 router = APIRouter(prefix="/api")
@@ -173,19 +174,32 @@ def settings():
 def stubs():
     return {"stubs": STUBS}
 
-# --- plant routes ---
-from app.modules import retire_mirror_badge as rbadge
+# --- 退役镜角标（retire_mirror_badge，架构乙·现场权威） ---
 
 @router.get("/retire/badges")
 def retire_badges():
+    """角标清单（只读）：角标 × 现场镜态 × 应有投影。"""
     conn = connect()
     try:
         return rbadge.list_badges(conn)
     finally:
         conn.close()
 
+
+@router.get("/retire/badges/verify")
+def retire_badges_verify():
+    """退役角标核证（只读，基线所无新增）：角标 ↔ 现场 is_current/镜态互证，
+    分叉即违例（闭段成功而角标仍可写 / 角标指未闭或邻键 hist / 漂移回可写）。"""
+    conn = connect()
+    try:
+        return rbadge.verify_badges(conn, ldc.retired_set(conn))
+    finally:
+        conn.close()
+
+
 @router.post("/retire/badges/sync")
 def retire_badges_sync():
+    """角标修复（唯一写路径）：以现场镜态为权威重投影全部角标并清理孤儿角标。"""
     conn = connect()
     try:
         return rbadge.sync_from_mirror(conn)

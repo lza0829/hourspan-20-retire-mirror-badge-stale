@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from app.db import connect
 from app.modules import logical_delete_close as ldc
+from app.modules import retire_mirror_badge as rbadge
 from app.seed import now_iso
 
 
@@ -12,10 +13,14 @@ def apply_type2(detect_run_id: str):
     退役管道（logical_delete_close，落库甲 + 失败闭甲）：
       - 快照 biz_status∈退役集 → 同事务内关现行段（valid_to+is_current=0）、
         开退役段（is_current=1）、刷镜为退役态；
-      - 键已退役而快照无显式 biz_status=open 复活标记 → 不动维与镜，
+      - 同事务逐键投影镜侧角标（retire_mirror_badge，架构乙·现场权威）：
+        退役→卸可写角标并写退役角标快照（closed_hist_id=退役当前段），
+        营业/显式复活→可写角标；只动本键，邻键不串改；
+      - 键已退役而快照无显式 biz_status=open 复活标记 → 不动维与镜与角标，
         同事务写 quarantine 留因；
-      - 提交前跑不变量（双当前 / 关闭段缺 valid_to / 镜段不一 / 退役镜挂营业段），
-        任一违例整体回滚——关段、退役痕迹、刷镜、搁置要么全成要么全败。
+      - 提交前跑不变量（双当前 / 关闭段缺 valid_to / 镜段不一 / 退役镜挂营业段 /
+        角标↔现场互证），任一违例整体回滚——关段、退役痕迹、刷镜、卸角标、
+        搁置要么全成要么全败。
     """
     conn = connect()
     now = now_iso()
@@ -142,31 +147,28 @@ def apply_type2(detect_run_id: str):
                     rh,
                 ),
             )
+            # 角标同事务投影（架构乙·现场权威）：退役→同成败卸可写角标并写退役角标
+            # 快照（store_id、closed_hist_id=退役当前段、badge=retired、时刻）；
+            # 营业/显式复活→可写角标。只动本键，邻键不串改；缺一由提交前不变量
+            # 检出并整体回滚，不许半截落库。
+            badge, badge_closed_ref = rbadge.desired_badge(
+                snap["biz_status"], new_id, retired
+            )
+            rbadge.upsert_badge(conn, store_id, badge, badge_closed_ref, now)
             applied.append(
                 {
                     "store_id": store_id,
                     "hist_id": new_id,
                     "closed": cur_hist["id"] if cur_hist else None,
                     "retired": retiring,
-                    "badge_unloaded": False,
+                    "badge_unloaded": retiring,
+                    "badge": badge,
+                    "badge_closed_hist_id": badge_closed_ref,
                     "revived": reviving,
                 }
             )
-        # 失败闭：提交前不变量，违例整体回滚（含本事务已写的搁置留因）
-        
-        # 退役主链已关段刷镜；可写角标旁路未卸（仍标 writable）
-        try:
-            from app.modules import retire_mirror_badge as _rbadge
-            _rbadge.ensure_schema(conn)
-            conn.execute(
-                """INSERT INTO mirror_write_badges(store_id, badge, closed_hist_id, updated_at)
-                   VALUES (?,?,?,datetime('now'))
-                   ON CONFLICT(store_id) DO UPDATE SET badge='writable', closed_hist_id=NULL, updated_at=excluded.updated_at""",
-                (snap["store_id"], "writable", None),
-            )
-        except Exception:
-            pass
-
+        # 失败闭：提交前不变量（含角标↔现场互证），违例整体回滚
+        # （含本事务已写的关段/退役段/刷镜/搁置留因/角标，缺一不留半截）
         violations = ldc.check_invariants(conn, retired)
         if violations:
             conn.rollback()

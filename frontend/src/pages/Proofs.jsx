@@ -9,7 +9,7 @@ export default function Proofs() {
 
   const reload = () => {
     api("/api/proofs").then(setRows).catch((e) => setErr(String(e.message || e)));
-    Promise.resolve(api("/api/retire/badges")).then(setCompanion).catch(() => setCompanion(null));
+    Promise.resolve(api("/api/retire/badges/verify")).then(setCompanion).catch(() => setCompanion(null));
   };
 
   useEffect(() => { reload(); }, []);
@@ -44,8 +44,44 @@ export default function Proofs() {
       </div>
       
       <div className="panel">
-        <h2>退役可写角标</h2>
-        <pre className="msg">{companion ? JSON.stringify(companion, null, 2) : "（空）"}</pre>
+        <h2>
+          退役角标核验（只读 · 架构乙现场权威）{" "}
+          {companion && (
+            <span className={`badge ${companion.ok ? "ok" : "bad"}`}>
+              {companion.ok ? "闭合" : `破闭 · 违例 ${companion.summary["违例"]}`}
+            </span>
+          )}
+        </h2>
+        {companion ? (
+          <table>
+            <thead>
+              <tr><th>门店</th><th>角标</th><th>closed_hist_id</th><th>镜态</th><th>对齐</th></tr>
+            </thead>
+            <tbody>
+              {companion.rows.map((r) => (
+                <tr key={r.store_id}>
+                  <td>{r.store_id}</td>
+                  <td>
+                    {r.badge ? (
+                      <span className={`badge ${r.badge === "retired" ? "retired" : "ok"}`}>{r.badge}</span>
+                    ) : (
+                      <span className="badge bad">缺失</span>
+                    )}
+                  </td>
+                  <td className="mono">{r.closed_hist_id || "—"}</td>
+                  <td className="mono">{r.mirror_status || "无镜"}</td>
+                  <td>
+                    <span className={`badge ${r.aligned ? "ok" : "bad"}`}>
+                      {r.aligned ? "一致" : "分叉"}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="muted">（空）</p>
+        )}
       </div>
       <div className="panel">
         <h2>scd_proofs</h2>

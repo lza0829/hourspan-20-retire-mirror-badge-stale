@@ -22,7 +22,14 @@
 
 只读核证 verify()：退役段 + 镜态 + 拒绝原因（quarantine）+ 全局不变量，
 供 GET /api/retirements 与前端退役页使用；全程只 SELECT。
+
+角标协同（retire_mirror_badge，架构乙·现场权威）：写闸 decide() 只扫现场镜态，
+不采信角标；角标是闭段同事务内落库的镜态投影。check_invariants 第 5 组检项
+直接复用 retire_mirror_badge.badge_violations —— 闭段成功而角标仍可写、
+角标指向未闭/邻键 hist、退役角标与营业 is_current 段并存，任一即整体回滚。
 """
+
+from app.modules import retire_mirror_badge as rbadge
 
 DEFAULT_RETIRED_SET = ("closed", "retired")
 DEFAULT_REVIVE_STATUS = "open"
@@ -143,11 +150,14 @@ def check_invariants(conn, retired) -> list:
         violations.append(
             {"kind": "current_segment_without_mirror", "store_id": r["store_id"], "hist_id": r["id"]}
         )
+    # 5) 角标 ↔ 现场互证（同事务卸标缺一回滚；禁角标仍可写/指未闭/串邻键/漂移回可写）
+    violations.extend(rbadge.badge_violations(conn, retired))
     return violations
 
 
 def verify(conn) -> dict:
-    """退役核证（只读）：退役段 + 镜态 + 拒绝原因 + 全局不变量。"""
+    """退役核证（只读）：退役段 + 镜态 + 拒绝原因 + 角标 + 全局不变量。"""
+    rbadge.ensure_schema(conn)
     retired = retired_set(conn)
     revive = revive_status(conn)
     placeholders = ",".join("?" * len(retired))
@@ -188,6 +198,12 @@ def verify(conn) -> dict:
         for r in conn.execute("SELECT * FROM quarantine ORDER BY id DESC").fetchall()
     ]
     violations = check_invariants(conn, retired)
+    badge_badges = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT * FROM mirror_write_badges ORDER BY store_id"
+        ).fetchall()
+    ]
     return {
         "retired_set": sorted(retired),
         "revive_status": revive,
@@ -195,15 +211,13 @@ def verify(conn) -> dict:
         "segments": segments,
         "quarantine": quarantine,
         "violations": violations,
+        "badges": badge_badges,
         "ok": not violations and seg_bad == 0,
         "summary": {
             "退役段": len(segments),
             "退役段违例": seg_bad,
             "全局违例": len(violations),
+            "角标违例": sum(1 for v in violations if str(v.get("kind", "")).startswith("badge") or "badge" in str(v.get("kind", ""))),
             "搁置": len(quarantine),
         },
     }
-
-
-def write_badge_state(conn, store_id: str) -> str:
-    return "writable"
